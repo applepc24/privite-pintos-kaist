@@ -13,6 +13,7 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "thread.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -336,16 +337,23 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	struct thread *curr = thread_current ();
+    enum intr_level old_level = intr_disable();
 
 	// 여기 추가해야 할 부분.
 	// 현재 스레드의 우선순위를 세팅하고, ready_list를 순서 다시 맞추기. 
 	// 1. 변경 후 현재 스레드가 더이상 최고 우선순위가 아니면 즉시 yield하기.
 
-	// if (thread_current()->priority != )
-	// {
+    /* 원래 우선순위 업데이트 */
+    curr ->priority = new_priority;
 
-	// }
+	list_sort(&ready_list, priority_more, NULL);
+
+	if (!list_empty(&ready_list) && curr->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
+		thread_yield();
+
+    intr_set_level(old_level);
+
 }
 
 /* Returns the current thread's priority. */
@@ -489,16 +497,21 @@ do_iret (struct intr_frame *tf) {
 			: : "g" ((uint64_t) tf) : "memory");
 }
 
+struct thread *thread_get_idle(void)
+{
+    return idle_thread;
+}
+
 /* Switching the thread by activating the new thread's page
-   tables, and, if the previous thread is dying, destroying it.
+    tables, and, if the previous thread is dying, destroying it.
 
-   At this function's invocation, we just switched from thread
-   PREV, the new thread is already running, and interrupts are
-   still disabled.
+    At this function's invocation, we just switched from thread
+    PREV, the new thread is already running, and interrupts are
+    still disabled.
 
-   It's not safe to call printf() until the thread switch is
-   complete.  In practice that means that printf()s should be
-   added at the end of the function. */
+    It's not safe to call printf() until the thread switch is
+    complete.  In practice that means that printf()s should be
+    added at the end of the function. */
 static void
 thread_launch (struct thread *th) {
 	uint64_t tf_cur = (uint64_t) &running_thread ()->tf;

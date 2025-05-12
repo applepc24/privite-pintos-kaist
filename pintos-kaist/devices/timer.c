@@ -119,7 +119,7 @@ void
 timer_sleep (int64_t ticks) {
 	int64_t start = timer_ticks ();
 
-	printf("-- start : %s, time : %d \n", thread_current()->name, start);
+	// printf("-- start : %s, time : %d \n", thread_current()->name, start);
 
 	ASSERT (intr_get_level () == INTR_ON);
 
@@ -164,7 +164,7 @@ void thread_sleep(int64_t ticks)
 	// t->status = THREAD_BLOCKED;
 
 	thread_block();
-	printf("%s blocked, time : %d\n", t->name, timer_ticks());
+	// printf("%s blocked, time : %d\n", t->name, timer_ticks());
 
 	intr_set_level(old_level);
 	// 어쨋든 이 함수의 목적은 
@@ -223,7 +223,7 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 
 		list_pop_front(&sleep_list);
 		thread_unblock(t);
-		printf("%s Unblocked, time : %d\n", t->name, timer_ticks());
+		// printf("%s Unblocked, time : %d\n", t->name, timer_ticks());
 
 		// 이건 sleep_list에 순서가 정해져 있지 않을 때,
 		// if (t->wakeup_time <= ticks)

@@ -96,6 +96,7 @@ struct thread {
 	int64_t wakeup_time;				// local tick을 저장하기 위해 변수 추가.
 
 	// 추가 사항 (Priority)
+	int original_priority; 				// 기부 받았을 전의 우선순위.
 	int effective_priority; 			// 기부 받았을 때의 우선순위.
 	struct list donations;				// 기부 받은 우선순위 목록.
 	
