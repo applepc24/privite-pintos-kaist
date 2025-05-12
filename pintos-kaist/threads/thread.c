@@ -207,6 +207,14 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	// 추가할 내용.
+	// 현재 진행중인 스레드와 새 스래드의 우선순위 비교.
+	// 새 스레드가 더 높은 우선순위면, CPU 양보.
+	if (t->priority > thread_current()->priority)
+	{
+		thread_yield();
+	}
+
 	return tid;
 }
 
@@ -224,6 +232,13 @@ thread_block (void) {
 	schedule ();
 }
 
+// 추가 부분
+bool priority_more(const struct list_elem *a, const struct list_elem *b, void *aux) {
+    return list_entry(a, struct thread, elem)->priority > 
+           list_entry(b, struct thread, elem)->priority;
+}
+
+
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -240,7 +255,14 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	// priority를 위해서. 추가한 내용.
+	list_insert_ordered(&ready_list, &t->elem, priority_more, NULL);
+
+	// 이건 그냥 있던거.
+	// list_push_back (&ready_list, &t->elem);
+
+	// 만약 스레드가 언블락되어있을 때,
+	// 우선 순위대로 ready_list에 넣기.
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -303,7 +325,10 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		// 얘는 그냥 ready_list에 막 넣던애.
+		// list_push_back (&ready_list, &curr->elem);
+		// 얘는 수정된 애. 우선순위 체크해서 넣음.
+		list_insert_ordered (&ready_list, &curr->elem, priority_more, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -312,12 +337,24 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+
+	// 여기 추가해야 할 부분.
+	// 현재 스레드의 우선순위를 세팅하고, ready_list를 순서 다시 맞추기. 
+	// 1. 변경 후 현재 스레드가 더이상 최고 우선순위가 아니면 즉시 yield하기.
+
+	// if (thread_current()->priority != )
+	// {
+
+	// }
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
 	return thread_current ()->priority;
+
+	// 추가할 부분.
+	// 1. 기부가 있는 경우, 기부받은 우선순위 중 가장 높은 값을 반환.
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -535,6 +572,7 @@ do_schedule(int status) {
 		palloc_free_page(victim);
 	}
 	thread_current ()->status = status;
+	// printf("%s\n", thread_current()->name);
 	schedule ();
 }
 
