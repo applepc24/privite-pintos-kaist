@@ -256,15 +256,15 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
+	// 만약 스레드가 언블락되어있을 때,
+	// 우선 순위대로 ready_list에 넣기.
+	t->status = THREAD_READY;
 	// priority를 위해서. 추가한 내용.
 	list_insert_ordered(&ready_list, &t->elem, priority_more, NULL);
 
 	// 이건 그냥 있던거.
 	// list_push_back (&ready_list, &t->elem);
 
-	// 만약 스레드가 언블락되어있을 때,
-	// 우선 순위대로 ready_list에 넣기.
-	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
 

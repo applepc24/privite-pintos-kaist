@@ -51,11 +51,20 @@ sema_init (struct semaphore *sema, unsigned value) {
 
 // 우선순위 조정을 위해 만든 함수
 // 추가 부분
-bool priority_more_semaCond(const struct list_elem *a, const struct list_elem *b, void *aux) {
+bool priority_more_Sema(const struct list_elem *a, const struct list_elem *b, void *aux) {
     return list_entry(a, struct thread, elem)->priority > 
            list_entry(b, struct thread, elem)->priority;
 }
 
+bool priority_more_Cond(const struct list_elem *a, const struct list_elem *b, void *aux) {
+    struct semaphore_elem *sa = list_entry(a, struct semaphore_elem, elem);
+	struct semaphore_elem *sb = list_entry(b, struct semaphore_elem, elem);
+
+	int a_priority = list_entry(list_begin(&sa->semaphore.waiters), struct thread, elem)->priority;
+	int b_priority = list_entry(list_begin(&sb->semaphore.waiters), struct thread, elem)->priority;
+	
+	return a_priority > b_priority;
+}
 
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
@@ -78,7 +87,7 @@ sema_down (struct semaphore *sema) {
 		// list_push_back (&sema->waiters, &thread_current ()->elem);
 
 		// priority를 위한 수정 버전.
-		list_insert_ordered (&sema->waiters, &thread_current ()->elem, priority_more_semaCond, NULL);
+		list_insert_ordered (&sema->waiters, &thread_current ()->elem, priority_more_Sema, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -126,12 +135,14 @@ sema_up (struct semaphore *sema) {
 		// 추가할 부분.
 		// waiters list를 다시 정렬해야 함.
 		// 이건 그냥 priority cha
-		list_sort(&sema->waiters, priority_more_semaCond, NULL);
+		list_sort(&sema->waiters, priority_more_Sema, NULL);
 		
 		thread_unblock (list_entry (list_pop_front (&sema->waiters),
 					struct thread, elem));
 	}
 	sema->value++;
+	thread_yield();
+	
 	intr_set_level (old_level);
 }
 
@@ -255,11 +266,7 @@ lock_held_by_current_thread (const struct lock *lock) {
 	return lock->holder == thread_current ();
 }
 
-/* One semaphore in a list. */
-struct semaphore_elem {
-	struct list_elem elem;              /* List element. */
-	struct semaphore semaphore;         /* This semaphore. */
-};
+
 
 /* Initializes condition variable COND.  A condition variable
    allows one piece of code to signal a condition and cooperating
@@ -305,7 +312,7 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	// list_push_back (&cond->waiters, &waiter.elem);
 
 	// 수정 버전.
-	list_insert_ordered(&cond->waiters, &waiter.elem, priority_more_semaCond, NULL);
+	list_insert_ordered(&cond->waiters, &waiter.elem, priority_more_Cond, NULL);
 
 
 	lock_release (lock);
@@ -332,7 +339,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 		// 추가할 부분.
 		// semaphore waiter list는 정렬해서 잘 하고 있지만,
 		// condition waiter list는 정렬해주지 않았음.
-		list_sort(&cond->waiters, priority_more_semaCond, NULL);
+		list_sort(&cond->waiters, priority_more_Cond, NULL);
 	
 		sema_up (&list_entry (list_pop_front (&cond->waiters),
 					struct semaphore_elem, elem)->semaphore);
