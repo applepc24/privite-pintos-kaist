@@ -189,6 +189,9 @@ thread_create (const char *name, int priority,
 	t = palloc_get_page (PAL_ZERO);
 	if (t == NULL)
 		return TID_ERROR;
+	
+	// 디버깅용
+	struct thread *curr = thread_current();
 
 	/* Initialize thread. */
 	init_thread (t, name, priority);
@@ -211,7 +214,7 @@ thread_create (const char *name, int priority,
 	// 추가할 내용.
 	// 현재 진행중인 스레드와 새 스래드의 우선순위 비교.
 	// 새 스레드가 더 높은 우선순위면, CPU 양보.
-	if (t->priority > thread_current()->priority)
+	if (t->priority > curr->priority)
 	{
 		thread_yield();
 	}
@@ -340,12 +343,25 @@ thread_set_priority (int new_priority) {
 	struct thread *curr = thread_current ();
     enum intr_level old_level = intr_disable();
 
-	// 여기 추가해야 할 부분.
-	// 현재 스레드의 우선순위를 세팅하고, ready_list를 순서 다시 맞추기. 
-	// 1. 변경 후 현재 스레드가 더이상 최고 우선순위가 아니면 즉시 yield하기.
-
     /* 원래 우선순위 업데이트 */
-    curr ->priority = new_priority;
+    curr->original_priority = new_priority;
+
+	// 추가한 부분
+	///////////////////////////////////////////////////////////////////////////
+
+	if (list_empty(&curr->donations))
+	{
+		curr->priority = new_priority;
+	}
+	else
+	{
+		int max_donated_priority = list_entry(list_max(&curr->donations, priority_more, NULL),
+												struct thread, donation_elem)->priority;
+
+		curr->priority = (new_priority > max_donated_priority) ? new_priority : max_donated_priority;
+	}
+	
+	///////////////////////////////////////////////////////////////////////////
 
 	list_sort(&ready_list, priority_more, NULL);
 
@@ -453,6 +469,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->original_priority = priority;
+	list_init(&t->donations);
+
 	t->magic = THREAD_MAGIC;
 }
 

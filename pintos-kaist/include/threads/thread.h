@@ -97,9 +97,11 @@ struct thread {
 
 	// 추가 사항 (Priority)
 	int original_priority; 				// 기부 받았을 전의 우선순위.
-	int effective_priority; 			// 기부 받았을 때의 우선순위.
 	struct list donations;				// 기부 받은 우선순위 목록.
+	struct lock *wait_on_lock;			// 현재 대기중인 락.
+	struct list_elem donation_elem;
 	
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	
