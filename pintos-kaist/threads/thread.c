@@ -13,6 +13,7 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "thread.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -188,6 +189,9 @@ thread_create (const char *name, int priority,
 	t = palloc_get_page (PAL_ZERO);
 	if (t == NULL)
 		return TID_ERROR;
+	
+	// 디버깅용
+	struct thread *curr = thread_current();
 
 	/* Initialize thread. */
 	init_thread (t, name, priority);
@@ -207,6 +211,14 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	// 추가할 내용.
+	// 현재 진행중인 스레드와 새 스래드의 우선순위 비교.
+	// 새 스레드가 더 높은 우선순위면, CPU 양보.
+	if (t->priority > curr->priority)
+	{
+		thread_yield();
+	}
+
 	return tid;
 }
 
@@ -224,6 +236,13 @@ thread_block (void) {
 	schedule ();
 }
 
+// 추가 부분
+bool priority_more(const struct list_elem *a, const struct list_elem *b, void *aux) {
+    return list_entry(a, struct thread, elem)->priority > 
+           list_entry(b, struct thread, elem)->priority;
+}
+
+
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -240,8 +259,15 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	// 만약 스레드가 언블락되어있을 때,
+	// 우선 순위대로 ready_list에 넣기.
 	t->status = THREAD_READY;
+	// priority를 위해서. 추가한 내용.
+	list_insert_ordered(&ready_list, &t->elem, priority_more, NULL);
+
+	// 이건 그냥 있던거.
+	// list_push_back (&ready_list, &t->elem);
+
 	intr_set_level (old_level);
 }
 
@@ -303,7 +329,10 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		// 얘는 그냥 ready_list에 막 넣던애.
+		// list_push_back (&ready_list, &curr->elem);
+		// 얘는 수정된 애. 우선순위 체크해서 넣음.
+		list_insert_ordered (&ready_list, &curr->elem, priority_more, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -311,13 +340,45 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	struct thread *curr = thread_current ();
+    enum intr_level old_level = intr_disable();
+
+    /* 원래 우선순위 업데이트 */
+    curr->original_priority = new_priority;
+
+	// 추가한 부분
+	///////////////////////////////////////////////////////////////////////////
+
+	if (list_empty(&curr->donations))
+	{
+		curr->priority = new_priority;
+	}
+	else
+	{
+		int max_donated_priority = list_entry(list_max(&curr->donations, priority_more, NULL),
+												struct thread, donation_elem)->priority;
+
+		curr->priority = (new_priority > max_donated_priority) ? new_priority : max_donated_priority;
+	}
+	
+	///////////////////////////////////////////////////////////////////////////
+
+	list_sort(&ready_list, priority_more, NULL);
+
+	if (!list_empty(&ready_list) && curr->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
+		thread_yield();
+
+    intr_set_level(old_level);
+
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
 	return thread_current ()->priority;
+
+	// 추가할 부분.
+	// 1. 기부가 있는 경우, 기부받은 우선순위 중 가장 높은 값을 반환.
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -408,6 +469,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->original_priority = priority;
+	list_init(&t->donations);
+
 	t->magic = THREAD_MAGIC;
 }
 
@@ -452,16 +516,21 @@ do_iret (struct intr_frame *tf) {
 			: : "g" ((uint64_t) tf) : "memory");
 }
 
+struct thread *thread_get_idle(void)
+{
+    return idle_thread;
+}
+
 /* Switching the thread by activating the new thread's page
-   tables, and, if the previous thread is dying, destroying it.
+    tables, and, if the previous thread is dying, destroying it.
 
-   At this function's invocation, we just switched from thread
-   PREV, the new thread is already running, and interrupts are
-   still disabled.
+    At this function's invocation, we just switched from thread
+    PREV, the new thread is already running, and interrupts are
+    still disabled.
 
-   It's not safe to call printf() until the thread switch is
-   complete.  In practice that means that printf()s should be
-   added at the end of the function. */
+    It's not safe to call printf() until the thread switch is
+    complete.  In practice that means that printf()s should be
+    added at the end of the function. */
 static void
 thread_launch (struct thread *th) {
 	uint64_t tf_cur = (uint64_t) &running_thread ()->tf;
@@ -535,6 +604,7 @@ do_schedule(int status) {
 		palloc_free_page(victim);
 	}
 	thread_current ()->status = status;
+	// printf("%s\n", thread_current()->name);
 	schedule ();
 }
 

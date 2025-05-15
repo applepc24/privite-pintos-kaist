@@ -10,6 +10,15 @@ struct semaphore {
 	struct list waiters;        /* List of waiting threads. */
 };
 
+/* One semaphore in a list. */
+// 원래 .c 파일에 있었는데, 그냥 여기로 옮겼음.
+// 너무 뒤에 있기도 하고, 구조체는 헤더에서 관리하는게 더 좋을것 같아서.
+
+struct semaphore_elem {
+	struct list_elem elem;              /* List element. */
+	struct semaphore semaphore;         /* This semaphore. */
+};
+
 void sema_init (struct semaphore *, unsigned value);
 void sema_down (struct semaphore *);
 bool sema_try_down (struct semaphore *);
