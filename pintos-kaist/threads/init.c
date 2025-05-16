@@ -50,6 +50,7 @@ static bool format_filesys;
 bool power_off_when_done;
 
 bool thread_tests;
+bool is_thread_init = false;
 
 static void bss_init (void);
 static void paging_init (uint64_t mem_end);
@@ -61,7 +62,6 @@ static void usage (void);
 
 static void print_stats (void);
 
-
 int main (void) NO_RETURN;
 
 /* Pintos main program. */
@@ -71,14 +71,19 @@ main (void) {
 	char **argv;
 
 	/* Clear BSS and get machine's RAM size. */
+	// printf("before_bss");
 	bss_init ();
+	// printf("after_bss");
 
 	/* Break command line into arguments and parse options. */
+	// printf("before_rcl");
 	argv = read_command_line ();
+	// printf("after_rcl, before parse");
 	argv = parse_options (argv);
-
+	// printf("after parse");
 	/* Initialize ourselves as a thread so we can use locks,
 	   then enable console locking. */
+	// printf("before_threadinit");
 	thread_init ();
 	console_init ();
 
@@ -91,6 +96,7 @@ main (void) {
 	tss_init ();
 	gdt_init ();
 #endif
+	is_thread_init = true;
 
 	/* Initialize interrupt handlers. */
 	intr_init ();
@@ -136,6 +142,7 @@ bss_init (void) {
 
 	   The start and end of the BSS segment is recorded by the
 	   linker as _start_bss and _end_bss.  See kernel.lds. */
+	printf("in_bss");
 	extern char _start_bss, _end_bss;
 	memset (&_start_bss, 0, &_end_bss - &_start_bss);
 }
@@ -175,7 +182,7 @@ read_command_line (void) {
 	char *p, *end;
 	int argc;
 	int i;
-
+	printf("in_rcl");
 	argc = *(uint32_t *) ptov (LOADER_ARG_CNT);
 	p = ptov (LOADER_ARGS);
 	end = p + LOADER_ARGS_LEN;
@@ -230,7 +237,7 @@ parse_options (char **argv) {
 		else
 			PANIC ("unknown option `%s' (use -h for help)", name);
 	}
-
+	printf("in_parse");
 	return argv;
 }
 
