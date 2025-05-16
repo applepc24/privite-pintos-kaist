@@ -251,6 +251,7 @@ process_cleanup (void) {
 void
 process_activate (struct thread *next) {
 	/* Activate thread's page tables. */
+	// printf("%s", next->name, next->pml4);
 	pml4_activate (next->pml4);
 
 	/* Set thread's kernel stack for use in processing interrupts. */
