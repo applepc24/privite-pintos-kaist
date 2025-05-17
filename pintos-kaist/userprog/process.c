@@ -167,7 +167,7 @@ process_exec (void *f_name) {
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
-	 * it stores the execution information to the member. */
+	 * it stores the execution information to the member. */	 
 	struct intr_frame _if;
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
@@ -175,6 +175,9 @@ process_exec (void *f_name) {
 
 	/* We first kill the current context */
 	process_cleanup ();
+
+	char *save_ptr;
+ 	file_name = strtok_r(file_name, " ", &save_ptr);
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
@@ -200,11 +203,40 @@ process_exec (void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	return -1;
+process_wait (tid_t child_tid) {
+    struct thread *cur = thread_current();
+    struct list_elem *e;
+    
+    // 자식 리스트에서 tid에 해당하는 자식의 wait_status 찾기
+    // for (e = list_begin(&cur->child_list); e != list_end(&cur->child_list); e = list_next(e)) {
+    //     struct wait_status *ws = list_entry(e, struct wait_status, elem);
+
+    //     if (ws->tid == child_tid) {
+    //         list_remove(e); // 재호출 방지
+
+    //         // 자식 종료될 때까지 기다림
+    //         sema_down(&ws->dead);
+
+    //         int exit_code = ws->exit_code;
+
+    //         // ref_cnt 감소, 필요 시 메모리 해제
+    //         lock_acquire(&ws->lock);
+    //         ws->ref_cnt--;
+    //         if (ws->ref_cnt == 0)
+    //             free(ws);
+    //         else
+    //             lock_release(&ws->lock);
+
+    //         return exit_code;
+    //     }
+    // }
+	for(int i=0; i<1000000000; i++){
+		int data = 1;
+	}
+	
+
+    // 자식이 아니거나 이미 대기한 경우
+    return -1;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -215,6 +247,19 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+	printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+
+	//부모에게 종료상태 전달
+	if(curr -> wait_status != NULL){
+		curr -> wait_status->exit_code = curr -> exit_status;
+		sema_up(&curr -> wait_status->dead);
+	}
+	for(int i=2; i < FD_MAX; i++){
+		if (curr->fdt[i] != NULL) {
+			file_close(curr->fdt[i]);
+			curr->fdt[i] = NULL;
+		}
+	}
 
 	process_cleanup ();
 }
@@ -311,7 +356,7 @@ struct ELF64_PHDR {
 #define ELF ELF64_hdr
 #define Phdr ELF64_PHDR
 
-static bool setup_stack (struct intr_frame *if_);
+static bool setup_stack (struct intr_frame *if_, char *cmdline);
 static bool validate_segment (const struct Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
@@ -409,7 +454,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Set up stack. */
-	if (!setup_stack (if_))
+	if (!setup_stack (if_, file_name))
 		goto done;
 
 	/* Start address. */
@@ -537,15 +582,66 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 /* Create a minimal stack by mapping a zeroed page at the USER_STACK */
 static bool
-setup_stack (struct intr_frame *if_) {
+setup_stack (struct intr_frame *if_, char *cmdline) {
 	uint8_t *kpage;
 	bool success = false;
 
 	kpage = palloc_get_page (PAL_USER | PAL_ZERO);
 	if (kpage != NULL) {
-		success = install_page (((uint8_t *) USER_STACK) - PGSIZE, kpage, true);
-		if (success)
-			if_->rsp = USER_STACK;
+		 success = install_page(((uint8_t *)USER_STACK) - PGSIZE, kpage, true);
+        if (success) {
+            if_->rsp = USER_STACK;
+
+            // 1. 인자 파싱
+            char *argv[32];
+            int argc = 0;
+            char *token, *save_ptr;
+
+            for (token = strtok_r(cmdline, " ", &save_ptr); token != NULL;
+                 token = strtok_r(NULL, " ", &save_ptr)) {
+                argv[argc++] = token;
+            }
+
+            // 2. 문자열을 스택에 복사 (역순)
+            char *arg_addresses[32];
+            for (int i = argc - 1; i >= 0; i--) {
+                size_t len = strlen(argv[i]) + 1; // 널 포함
+                if_->rsp -= len;
+                memcpy((void *)if_->rsp, argv[i], len);
+                arg_addresses[i] = (char *)if_->rsp;
+            }
+
+            // 3. word align (16바이트 정렬)
+            while (if_->rsp % 8 != 0) {
+                if_->rsp--;
+                *(uint8_t *)if_->rsp = 0;
+            }
+
+            // 4. argv[i] 포인터를 스택에 저장
+            if_->rsp -= sizeof(char *);
+            *(char **)if_->rsp = NULL; // argv[argc] = NULL
+
+            for (int i = argc - 1; i >= 0; i--) {
+                if_->rsp -= sizeof(char *);
+                *(char **)if_->rsp = arg_addresses[i];
+            }
+
+            // 5. argv 주소를 다시 저장
+            char **argv_addr = (char **)if_->rsp;
+
+            // 6. argc 저장
+            if_->rsp -= sizeof(int);
+            *(int *)if_->rsp = argc;
+
+            // 7. fake return address
+            if_->rsp -= sizeof(void *);
+            *(void **)if_->rsp = 0;
+
+            //  최종적으로 %rdi ← argc, %rsi ← argv
+            if_->R.rdi = argc;
+            if_->R.rsi = (uint64_t)argv_addr;
+		}
+			
 		else
 			palloc_free_page (kpage);
 	}
