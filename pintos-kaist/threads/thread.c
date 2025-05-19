@@ -471,6 +471,15 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->original_priority = priority;
 	list_init(&t->donations);
 
+	#ifdef USERPROG
+	//  파일 디스크립터 테이블 초기화
+	for (int i = 0; i < FD_MAX; i++)
+		t->fdt[i] = NULL;
+	
+	list_init(&t->child_list);
+	t->wait_status = NULL;
+	#endif
+
 	t->magic = THREAD_MAGIC;
 }
 
