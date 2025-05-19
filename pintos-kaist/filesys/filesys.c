@@ -7,7 +7,9 @@
 #include "filesys/inode.h"
 #include "filesys/directory.h"
 #include "devices/disk.h"
+#include "threads/synch.h"
 
+struct lock filesys_lock;
 /* The disk that contains the file system. */
 struct disk *filesys_disk;
 
@@ -20,6 +22,8 @@ filesys_init (bool format) {
 	filesys_disk = disk_get (0, 1);
 	if (filesys_disk == NULL)
 		PANIC ("hd0:1 (hdb) not present, file system initialization failed");
+	
+	lock_init(&filesys_lock);
 
 	inode_init ();
 

@@ -23,9 +23,11 @@
 #endif
 
 static void process_cleanup (void);
-static bool load (const char *file_name, struct intr_frame *if_);
+// static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+static bool load (const char *file_name, struct intr_frame *if_, int argc, char **argv);
+static bool setup_stack (struct intr_frame *if_, int argc, char **argv);
 
 /* General process initializer for initd and other process. */
 static void
@@ -158,38 +160,50 @@ error:
 	thread_exit ();
 }
 
-/* Switch the current execution context to the f_name.
- * Returns -1 on fail. */
-int
-process_exec (void *f_name) {
-	char *file_name = f_name;
-	bool success;
 
-	/* We cannot use the intr_frame in the thread structure.
-	 * This is because when current thread rescheduled,
-	 * it stores the execution information to the member. */	 
-	struct intr_frame _if;
-	_if.ds = _if.es = _if.ss = SEL_UDSEG;
-	_if.cs = SEL_UCSEG;
-	_if.eflags = FLAG_IF | FLAG_MBS;
+int process_exec(void *f_name) {
+    char *fn_copy = palloc_get_page(0);
+    if (fn_copy == NULL)
+        return -1;
+    strlcpy(fn_copy, f_name, PGSIZE);
 
-	/* We first kill the current context */
-	process_cleanup ();
+    char *argv[32];
+    int argc = 0;
+    char *token, *save_ptr;
 
-	char *save_ptr;
- 	file_name = strtok_r(file_name, " ", &save_ptr);
+       // ✅ 첫 번째 token 처리
+    token = strtok_r(fn_copy, " ", &save_ptr);
+    if (token == NULL)
+        return -1;
+    argv[argc++] = token;
 
-	/* And then load the binary */
-	success = load (file_name, &_if);
+    // ✅ 나머지 인자 처리
+    while ((token = strtok_r(NULL, " ", &save_ptr)) != NULL) {
+        argv[argc++] = token;
+    }
 
-	/* If load failed, quit. */
-	palloc_free_page (file_name);
-	if (!success)
-		return -1;
+    // ✅ 프로그램 이름만 따로 저장
+    strlcpy(thread_current()->name, argv[0], sizeof thread_current()->name);
 
-	/* Start switched process. */
-	do_iret (&_if);
-	NOT_REACHED ();
+    /* Setup CPU context for the new process */
+    struct intr_frame _if;
+    _if.ds = _if.es = _if.ss = SEL_UDSEG;
+    _if.cs = SEL_UCSEG;
+    _if.eflags = FLAG_IF | FLAG_MBS;
+
+    process_cleanup();
+
+    bool success = load(argv[0], &_if, argc, argv);
+    // if (success && !setup_stack(&_if, argc, argv))
+    //     success = false;
+
+    palloc_free_page(fn_copy);
+
+    if (!success)
+        return -1;
+
+    do_iret(&_if);
+    NOT_REACHED();
 }
 
 
@@ -356,7 +370,7 @@ struct ELF64_PHDR {
 #define ELF ELF64_hdr
 #define Phdr ELF64_PHDR
 
-static bool setup_stack (struct intr_frame *if_, char *cmdline);
+static bool setup_stack (struct intr_frame *if_, int argc, char **argv);
 static bool validate_segment (const struct Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
@@ -367,7 +381,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
 static bool
-load (const char *file_name, struct intr_frame *if_) {
+load (const char *file_name, struct intr_frame *if_, int argc, char **argv) {
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
@@ -454,7 +468,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Set up stack. */
-	if (!setup_stack (if_, file_name))
+	if (!setup_stack (if_, argc, argv))
 		goto done;
 
 	/* Start address. */
@@ -580,53 +594,43 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	return true;
 }
 
-/* Create a minimal stack by mapping a zeroed page at the USER_STACK */
 static bool
-setup_stack (struct intr_frame *if_, char *cmdline) {
-	uint8_t *kpage;
-	bool success = false;
+setup_stack(struct intr_frame *if_, int argc, char **argv) {
+    uint8_t *kpage;
+    bool success = false;
 
-	kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-	if (kpage != NULL) {
-		 success = install_page(((uint8_t *)USER_STACK) - PGSIZE, kpage, true);
+    kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    if (kpage != NULL) {
+        success = install_page(((uint8_t *)USER_STACK) - PGSIZE, kpage, true);
         if (success) {
             if_->rsp = USER_STACK;
 
-            // 1. 인자 파싱
-            char *argv[32];
-            int argc = 0;
-            char *token, *save_ptr;
-
-            for (token = strtok_r(cmdline, " ", &save_ptr); token != NULL;
-                 token = strtok_r(NULL, " ", &save_ptr)) {
-                argv[argc++] = token;
-            }
-
-            // 2. 문자열을 스택에 복사 (역순)
-            char *arg_addresses[32];
+            // 1. 인자 문자열을 스택에 복사 (역순)
+            char *arg_addresses[32];  // 각 argv[i]의 주소 저장
             for (int i = argc - 1; i >= 0; i--) {
-                size_t len = strlen(argv[i]) + 1; // 널 포함
+                size_t len = strlen(argv[i]) + 1;
                 if_->rsp -= len;
                 memcpy((void *)if_->rsp, argv[i], len);
                 arg_addresses[i] = (char *)if_->rsp;
             }
 
-            // 3. word align (16바이트 정렬)
+            // 2. Word-align (8바이트 단위 정렬)
             while (if_->rsp % 8 != 0) {
                 if_->rsp--;
                 *(uint8_t *)if_->rsp = 0;
             }
 
-            // 4. argv[i] 포인터를 스택에 저장
+            // 3. NULL sentinel
             if_->rsp -= sizeof(char *);
-            *(char **)if_->rsp = NULL; // argv[argc] = NULL
+            *(char **)if_->rsp = NULL;
 
+            // 4. argv[] 주소들 저장
             for (int i = argc - 1; i >= 0; i--) {
                 if_->rsp -= sizeof(char *);
                 *(char **)if_->rsp = arg_addresses[i];
             }
 
-            // 5. argv 주소를 다시 저장
+            // 5. argv 포인터 저장
             char **argv_addr = (char **)if_->rsp;
 
             // 6. argc 저장
@@ -637,15 +641,14 @@ setup_stack (struct intr_frame *if_, char *cmdline) {
             if_->rsp -= sizeof(void *);
             *(void **)if_->rsp = 0;
 
-            //  최종적으로 %rdi ← argc, %rsi ← argv
+            // 8. 레지스터 설정
             if_->R.rdi = argc;
             if_->R.rsi = (uint64_t)argv_addr;
-		}
-			
-		else
-			palloc_free_page (kpage);
-	}
-	return success;
+        } else {
+            palloc_free_page(kpage);
+        }
+    }
+    return success;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

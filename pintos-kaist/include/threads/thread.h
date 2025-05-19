@@ -1,5 +1,6 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
+#define FD_MAX 128
 
 #include <debug.h>
 #include <list.h>
@@ -100,6 +101,9 @@ struct thread {
 	struct list donations;				// 기부 받은 우선순위 목록.
 	struct lock *wait_on_lock;			// 현재 대기중인 락.
 	struct list_elem donation_elem;
+	struct list child_list;
+	int exit_status;
+	struct wait_status *wait_status; 
 	
 
 	/* Shared between thread.c and synch.c. */
@@ -109,6 +113,7 @@ struct thread {
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
+	struct file *fdt[FD_MAX]; 
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
